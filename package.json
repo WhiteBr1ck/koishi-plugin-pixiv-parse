@@ -1,22 +1,54 @@
 {
   "name": "koishi-plugin-pixiv-parse",
-  "description": "pixiv",
-  "version": "0.0.1",
+  "description": "提供 Pixiv 链接解析与更新订阅功能的 Koishi 插件",
+  "version": "0.1.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
     "dist"
   ],
+  "author": "WhiteBr1ck (https://github.com/WhiteBr1ck)",
   "license": "MIT",
-  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WhiteBr1ck/koishi-plugin-pixiv-parse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/WhiteBr1ck/koishi-plugin-pixiv-parse/issues"
+  },
+  "homepage": "https://github.com/WhiteBr1ck/koishi-plugin-pixiv-parse#readme",
   "keywords": [
-    "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "pixiv",
+    "解析",
+    "订阅",
+    "parse",
+    "subscription"
   ],
-  "devDependencies": {},
+  "koishi": {
+    "service": {
+      "required": [
+        "puppeteer",
+        "database"
+      ]
+    },
+    "description": {
+      "zh": "Pixiv 原图下载插件，可以自动解析推特 pixiv 链接，同时也支持 pid 指令调用，订阅推送。发送方式多样（原图/PDF/合并转发）。"
+    }
+  },
   "peerDependencies": {
-    "koishi": "^4.18.7"
+    "koishi": "^4.18.7",
+    "@koishijs/plugin-puppeteer": "*",
+    "@koishijs/plugin-database-sqlite": "*"
+  },
+  "dependencies": {
+    "muhammara": "^4.1.0",
+    "sharp": "^0.33.4"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w"
   }
 }
