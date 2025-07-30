@@ -75,6 +75,11 @@ npm install koishi-plugin-pixiv-parse
 
 请将教程中最终获取到的 `refresh_token` 字符串粘贴到插件配置中。
 
+## 更新日志
+
+### v0.1.2 (2025-07-30)
+- **[修复]** 解决了 `accessToken` 过期后插件无法自动刷新的问题。
+
 ## 免责声明
 
 1.  本插件仅供学习和个人用途，请在遵守 Pixiv 用户协议的前提下使用。

@@ -137,6 +137,7 @@ class PixivService {
     }
   }
 
+  // 增强了错误处理
   private async _refreshAccessToken(): Promise<boolean> {
     if (!this.config.refreshToken) {
       logger.warn('未配置 Refresh Token，无法进行认证。')
@@ -164,28 +165,49 @@ class PixivService {
       }
       return false
     } catch (error) {
+      // 清除无效的 accessToken
+      this.accessToken = null
       logger.error('刷新 AccessToken 失败:', error.response?.data || error.message)
       return false
     }
   }
 
-  private async ensureToken(): Promise<boolean> {
-    if (!this.accessToken) return this._refreshAccessToken()
-    return true
+  // 完整的请求、失败、刷新、重试逻辑
+  private async _request(url: string, params: Record<string, any>) {
+    if (!this.accessToken) {
+        if (!await this._refreshAccessToken()) {
+            throw new Error('无法获取或刷新 Access Token。');
+        }
+    }
+
+    const makeRequest = () => {
+        const requestHeaders = { ...this.headers, 'Authorization': `Bearer ${this.accessToken}` };
+        return this.ctx.http.get(url, { params, headers: requestHeaders });
+    };
+
+    try {
+        return await makeRequest();
+    } catch (error) {
+        const errorMsg = error.response?.data?.error?.message || '';
+        if (error.response?.status === 400 && /invalid_grant|invalid_token/i.test(errorMsg)) {
+            if (this.config.debug) logger.info('AccessToken 已失效，尝试强制刷新...');
+            if (await this._refreshAccessToken()) {
+                if (this.config.debug) logger.info('刷新成功，正在重试请求...');
+                return await makeRequest();
+            }
+        }
+        throw error;
+    }
   }
   
+  // 使用新的 _request 包装器
   public async getArtworkDetail(pid: string) {
-    if (!await this.ensureToken()) return null
     try {
-      const requestHeaders = { ...this.headers, 'Authorization': `Bearer ${this.accessToken}` }
-      const response = await this.ctx.http.get(`https://app-api.pixiv.net/v1/illust/detail`, {
-        params: { illust_id: pid, filter: 'for_ios' },
-        headers: requestHeaders,
-      })
-      return response.illust
+      const response = await this._request(`https://app-api.pixiv.net/v1/illust/detail`, { illust_id: pid, filter: 'for_ios' });
+      return response.illust;
     } catch (error) {
-      if (this.config.debug) logger.warn(`获取插画详情失败 (PID: ${pid}):`, error.response?.data || error.message)
-      return null
+      if (this.config.debug) logger.warn(`获取插画详情失败 (PID: ${pid}):`, error.response?.data || error.message);
+      return null;
     }
   }
 
@@ -204,32 +226,22 @@ class PixivService {
   }
 
   public async getUserDetail(uid: string) {
-    if (!await this.ensureToken()) return null
     try {
-        const requestHeaders = { ...this.headers, 'Authorization': `Bearer ${this.accessToken}` }
-        const response = await this.ctx.http.get('https://app-api.pixiv.net/v1/user/detail', {
-            params: { user_id: uid },
-            headers: requestHeaders,
-        })
-        return response
+        const response = await this._request('https://app-api.pixiv.net/v1/user/detail', { user_id: uid });
+        return response;
     } catch (error) {
-      if (this.config.debug) logger.warn(`获取用户详情失败 (UID: ${uid}):`, error.response?.data || error.message)
-      return null
+      if (this.config.debug) logger.warn(`获取用户详情失败 (UID: ${uid}):`, error.response?.data || error.message);
+      return null;
     }
   }
 
   public async getUserIllusts(uid: string) {
-    if (!await this.ensureToken()) return null
     try {
-      const requestHeaders = { ...this.headers, 'Authorization': `Bearer ${this.accessToken}` }
-      const response = await this.ctx.http.get(`https://app-api.pixiv.net/v1/user/illusts`, {
-        params: { user_id: uid, filter: 'for_ios' },
-        headers: requestHeaders,
-      })
-      return response.illusts
+      const response = await this._request(`https://app-api.pixiv.net/v1/user/illusts`, { user_id: uid, filter: 'for_ios' });
+      return response.illusts;
     } catch (error) {
-      if (this.config.debug) logger.warn(`获取用户作品失败 (UID: ${uid}):`, error.response?.data || error.message)
-      return null
+      if (this.config.debug) logger.warn(`获取用户作品失败 (UID: ${uid}):`, error.response?.data || error.message);
+      return null;
     }
   }
 }
@@ -460,7 +472,7 @@ export function apply(ctx: Context, config: Config) {
           const { user, profile } = detailResponse
           let textInfo = `[作者] ${user.name} (@${user.account})`
             + `\n[主页] https://www.pixiv.net/users/${user.id}`
-          if (profile.total_follow_users) textInfo += `\n[关注] ${profile.total_follow_users} 人`
+          if (profile.total_follow_users) textInfo += `[关注] ${profile.total_follow_users} 人`
           const totalWorks = profile.total_illusts + profile.total_manga
           if (totalWorks > 0) textInfo += `\n[插画/漫画] ${totalWorks} 个`
           const cleanBio = (profile.comment || '').replace(/<br \/>/g, "\n").replace(/<[^>]*>/g, "")
