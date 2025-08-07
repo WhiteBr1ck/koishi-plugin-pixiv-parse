@@ -24,12 +24,13 @@ declare module 'koishi' {
   }
 }
 
-// --- 配置项定义 ---
+
 export type Subscription = {
   uid: string
   name: string
   channelIds: string[]
 }
+
 
 export interface Config {
   refreshToken?: string
@@ -42,6 +43,7 @@ export interface Config {
   pdfThreshold: number
   autoPdfForR18: boolean
   pdfPassword?: string
+  pdfSendMode: 'buffer' | 'file'
   enableCompression: boolean
   compressionQuality: number
   downloadConcurrency: number
@@ -79,6 +81,11 @@ export const Config: Schema<Config> = Schema.intersect([
     pdfThreshold: Schema.number().min(0).step(1).description('【插画】图片数量超过此值时，将自动转为 PDF 发送。优先级高于合并转发。设为 0 则永不转为 PDF。').default(10),
     autoPdfForR18: Schema.boolean().description('【插画】当 R-18 作品被允许发送时，是否自动转为 PDF 发送（无视图片数量）。').default(true),
     pdfPassword: Schema.string().role('secret').description('（可选）为生成的 PDF 文件设置一个打开密码。'),
+    
+    pdfSendMode: Schema.union([
+      Schema.const('buffer').description('buffer (内存模式)'),
+      Schema.const('file').description('file (硬盘模式)')
+    ]).description('【PDF模式】发送方式。Docker 环境请选择 buffer 。').default('buffer'),
     enableCompression: Schema.boolean().description('【PDF模式】是否启用图片压缩以减小 PDF 文件体积。').default(true),
     compressionQuality: Schema.number().min(1).max(100).step(1).role('slider').default(80)
       .description('【PDF模式】JPEG 图片质量 (1-100)。注意：JPEG为有损压缩，100为最高质量而非无损。'),
@@ -123,7 +130,7 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description('高级设置 (警告：除非你知道你在做什么，否则不要修改这些值！)'),
 ]);
 
-// --- 服务封装 ---
+
 class PixivService {
   private accessToken: string | null = null
   private readonly headers: Record<string, string>
@@ -137,7 +144,6 @@ class PixivService {
     }
   }
 
-  // 增强了错误处理
   private async _refreshAccessToken(): Promise<boolean> {
     if (!this.config.refreshToken) {
       logger.warn('未配置 Refresh Token，无法进行认证。')
@@ -165,14 +171,12 @@ class PixivService {
       }
       return false
     } catch (error) {
-      // 清除无效的 accessToken
       this.accessToken = null
       logger.error('刷新 AccessToken 失败:', error.response?.data || error.message)
       return false
     }
   }
 
-  // 完整的请求、失败、刷新、重试逻辑
   private async _request(url: string, params: Record<string, any>) {
     if (!this.accessToken) {
         if (!await this._refreshAccessToken()) {
@@ -200,7 +204,6 @@ class PixivService {
     }
   }
   
-  // 使用新的 _request 包装器
   public async getArtworkDetail(pid: string) {
     try {
       const response = await this._request(`https://app-api.pixiv.net/v1/illust/detail`, { illust_id: pid, filter: 'for_ios' });
@@ -256,7 +259,8 @@ export function apply(ctx: Context, config: Config) {
 
   const pixiv = new PixivService(ctx, config)
 
-  async function createPdfFromBuffers(illust: any, buffers: Buffer[]): Promise<Buffer> {
+
+  async function createPdfFile(illust: any, buffers: Buffer[]): Promise<string> {
     const safeTitle = (illust.title || illust.id).replace(/[\\/:\*\?"<>\|]/g, '_')
     const tempDir = path.resolve(ctx.app.baseDir, 'data', 'temp', 'pixiv-parse')
     const tempPdfPath = path.resolve(tempDir, `${safeTitle}_${Date.now()}.pdf`)
@@ -281,9 +285,10 @@ export function apply(ctx: Context, config: Config) {
       }
       if (config.pdfPassword) recipe.encrypt({ userPassword: config.pdfPassword, ownerPassword: config.pdfPassword })
       recipe.endPDF()
-      return fs.readFile(tempPdfPath)
+
+      return tempPdfPath
     } finally {
-      try { await fs.unlink(tempPdfPath) } catch {}
+
       try { await fs.rm(tempImageDir, { recursive: true, force: true }) } catch {}
     }
   }
@@ -352,14 +357,29 @@ export function apply(ctx: Context, config: Config) {
       
       const safeTitle = (illust.title || illust.id).replace(/[\\/:\*\?"<>\|]/g, '_');
 
-      if (config.autoPdfForR18 && isR18) {
-        const pdfBuffer = await createPdfFromBuffers(illust, imageBuffers)
-        return [h('p', textInfo), h.file(pdfBuffer, 'application/pdf', { title: `${safeTitle}.pdf` })]
-      }
+      const shouldCreatePdf = (config.autoPdfForR18 && isR18) || (config.pdfThreshold > 0 && imageCount >= config.pdfThreshold);
 
-      if (config.pdfThreshold > 0 && imageCount >= config.pdfThreshold) {
-        const pdfBuffer = await createPdfFromBuffers(illust, imageBuffers)
-        return [h('p', textInfo), h.file(pdfBuffer, 'application/pdf', { title: `${safeTitle}.pdf` })]
+
+      if (shouldCreatePdf) {
+        const pdfPath = await createPdfFile(illust, imageBuffers);
+        let messageElements: h[];
+        try {
+          if (config.pdfSendMode === 'file') {
+            if (config.debug) logger.info(`[PDF] 使用 "file" 模式发送: ${pdfPath}`);
+            messageElements = [h('p', textInfo), h.file(`file://${pdfPath}`, { title: `${safeTitle}.pdf` })];
+          } else {
+            if (config.debug) logger.info(`[PDF] 使用 "buffer" 模式发送`);
+            const pdfBuffer = await fs.readFile(pdfPath);
+            messageElements = [h('p', textInfo), h.file(pdfBuffer, 'application/pdf', { title: `${safeTitle}.pdf` })];
+          }
+          return messageElements;
+        } finally {
+
+          const delay = config.pdfSendMode === 'file' ? 5000 : 0;
+          setTimeout(() => {
+            fs.unlink(pdfPath).catch(e => logger.warn(`[PDF] 清理临时文件失败 ${pdfPath}:`, e));
+          }, delay);
+        }
       }
 
       const allContentNodes: h[] = [h('p', textInfo), ...imageBuffers.map(buffer => h.image(buffer, 'image/png'))]
@@ -472,7 +492,7 @@ export function apply(ctx: Context, config: Config) {
           const { user, profile } = detailResponse
           let textInfo = `[作者] ${user.name} (@${user.account})`
             + `\n[主页] https://www.pixiv.net/users/${user.id}`
-          if (profile.total_follow_users) textInfo += `[关注] ${profile.total_follow_users} 人`
+          if (profile.total_follow_users) textInfo += `\n[关注] ${profile.total_follow_users} 人`
           const totalWorks = profile.total_illusts + profile.total_manga
           if (totalWorks > 0) textInfo += `\n[插画/漫画] ${totalWorks} 个`
           const cleanBio = (profile.comment || '').replace(/<br \/>/g, "\n").replace(/<[^>]*>/g, "")

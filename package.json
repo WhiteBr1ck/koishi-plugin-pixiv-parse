@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-pixiv-parse",
   "description": "提供 Pixiv 链接解析与更新订阅功能的 Koishi 插件",
-  "version": "0.1.2",
+  "version": "0.2.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
