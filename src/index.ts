@@ -3,11 +3,11 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { Recipe } from 'muhammara'
 import sharp from 'sharp'
-import Puppeteer from 'koishi-plugin-puppeteer'
+import type Puppeteer from 'koishi-plugin-puppeteer'
 
 export const name = 'pixiv-parse'
 export const inject = {
-  required: ['http', 'puppeteer', 'database'],
+  required: ['http', 'database'], optional: ['puppeteer'],
 }
 
 const logger = new Logger(name)
@@ -92,7 +92,7 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description('插画输出模式设置'),
   
   Schema.object({
-    enableUidCommand: Schema.boolean().description('是否启用 `uid` 指令来获取作者主页截图。注意：该功能依赖 Puppeteer 服务插件，且会消耗更多资源。').default(true),
+    enableUidCommand: Schema.boolean().description('是否启用 `uid` 指令来获取作者主页截图。<b>注意：必须安装并启用 `puppeteer` 服务插件才能使用此功能。</b>').default(true),
     sendUserInfoText: Schema.boolean().description('发送作者主页截图时，是否同时发送作者的文本信息（昵称、简介等）。').default(true),
   }).description('作者主页 (UID) 设置'),
   
@@ -480,6 +480,12 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('uid <uid:string>', '获取 Pixiv 作者主页信息与截图')
     .action(async ({ session }, uid) => {
       if (!config.enableUidCommand) return 'uid 指令未启用。'
+
+      if (!ctx.puppeteer) {
+        logger.warn('uid 指令需要 puppeteer 服务，但该服务未启用或未注入。')
+        return '错误：此功能依赖的 puppeteer 服务未启用。'
+      }
+      
       if (!uid || !/^\d+$/.test(uid)) return '请输入有效的 Pixiv 用户 ID。'
       const statusMessage = await session.send(h('quote', { id: session.messageId }) + `正在获取作者信息 (UID: ${uid})...`)
       try {
