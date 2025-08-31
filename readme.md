@@ -19,11 +19,6 @@
 
 在 Koishi 插件市场搜索 `pixiv-parse` 并安装。
 
-或通过命令行执行：
-```bash
-npm install koishi-plugin-pixiv-parse
-```
-
 ## 使用说明
 
 ### 链接解析
@@ -76,6 +71,10 @@ npm install koishi-plugin-pixiv-parse
 请将教程中最终获取到的 `refresh_token` 字符串粘贴到插件配置中。
 
 ## 更新日志
+
+### v0.3.0 (2025-08-31)
+- **[新增]** 新增直发模式的图片压缩功能。
+- **[修复]** 修复了部分文件名无法正确显示的问题。
 
 ### v0.1.2 (2025-07-30)
 - **[修复]** 解决了 `accessToken` 过期后插件无法自动刷新的问题。

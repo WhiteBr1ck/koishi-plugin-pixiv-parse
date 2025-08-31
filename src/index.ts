@@ -46,6 +46,8 @@ export interface Config {
   pdfSendMode: 'buffer' | 'file'
   enableCompression: boolean
   compressionQuality: number
+  enableDirectCompress: boolean
+  directCompressQuality: number
   downloadConcurrency: number
   enableUidCommand: boolean
   sendUserInfoText: boolean
@@ -89,6 +91,10 @@ export const Config: Schema<Config> = Schema.intersect([
     enableCompression: Schema.boolean().description('【PDF模式】是否启用图片压缩以减小 PDF 文件体积。').default(true),
     compressionQuality: Schema.number().min(1).max(100).step(1).role('slider').default(80)
       .description('【PDF模式】JPEG 图片质量 (1-100)。注意：JPEG为有损压缩，100为最高质量而非无损。'),
+    
+    enableDirectCompress: Schema.boolean().description('【直发模式】是否启用图片压缩以减少发送时的内存占用。').default(false),
+    directCompressQuality: Schema.number().min(1).max(100).step(1).role('slider').default(80)
+      .description('【直发模式】JPEG 图片质量 (1-100)。PNG 图片会进行无损压缩。'),
   }).description('插画输出模式设置'),
   
   Schema.object({
@@ -259,6 +265,24 @@ export function apply(ctx: Context, config: Config) {
 
   const pixiv = new PixivService(ctx, config)
 
+  // 直发压缩功能（可配置）
+  async function compressForSend(img: { buffer: Buffer; mime: string }): Promise<{ buffer: Buffer; mime: string }> {
+    if (!config.enableDirectCompress) return img
+    try {
+      if (img.mime === 'image/jpeg') {
+        const out = await sharp(img.buffer).jpeg({ quality: config.directCompressQuality, mozjpeg: true }).toBuffer()
+        return { buffer: out, mime: 'image/jpeg' }
+      }
+      if (img.mime === 'image/png') {
+        const out = await sharp(img.buffer).png({ compressionLevel: 7, palette: true }).toBuffer()
+        return { buffer: out, mime: 'image/png' }
+      }
+      return img
+    } catch (e) {
+      logger.warn(`[直发压缩] 失败，使用原图: ${e.message}`)
+      return img
+    }
+  }
 
   async function createPdfFile(illust: any, buffers: Buffer[]): Promise<string> {
     const safeTitle = (illust.title || illust.id).replace(/[\\/:\*\?"<>\|]/g, '_')
@@ -340,11 +364,15 @@ export function apply(ctx: Context, config: Config) {
         imageUrls.push(illust.meta_single_page.original_image_url)
       }
       
-      const imageBuffers = (await Promise.all(imageUrls.map(url => pixiv.downloadImage(url)))).filter(Boolean)
+      const guessMime = (url: string) => url.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+      const images = (await Promise.all(imageUrls.map(async (url) => {
+        const buffer = await pixiv.downloadImage(url)
+        return buffer ? { buffer, mime: guessMime(url) } : null
+      }))).filter((x): x is { buffer: Buffer; mime: string } => !!x)
 
-      if (imageBuffers.length === 0) return isSubscription ? null : h('quote', { id: session.messageId }) + '所有图片都下载失败了，无法发送。'
+      if (images.length === 0) return isSubscription ? null : h('quote', { id: session.messageId }) + '所有图片都下载失败了，无法发送。'
       
-      const imageCount = imageBuffers.length
+      const imageCount = images.length
       let textInfo = (isSubscription ? `[${illust.user.name} 的作品更新]\n` : '')
         + `[标题] ${illust.title}`
         + (config.sendAuthor ? `\n[作者] ${illust.user.name}` : '')
@@ -355,13 +383,16 @@ export function apply(ctx: Context, config: Config) {
         textInfo += `\n[源链接] https://www.pixiv.net/artworks/${id}`
       }
       
-      const safeTitle = (illust.title || illust.id).replace(/[\\/:\*\?"<>\|]/g, '_');
+      const safeTitle = (illust.title || illust.id)
+        .replace(/[\\/:\*\?"<>\|]/g, '_')  // Windows 非法字符
+        .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')  // 移除 Emoji
+        || illust.id;  // 如果清理后为空，使用 ID
 
       const shouldCreatePdf = (config.autoPdfForR18 && isR18) || (config.pdfThreshold > 0 && imageCount >= config.pdfThreshold);
 
 
       if (shouldCreatePdf) {
-        const pdfPath = await createPdfFile(illust, imageBuffers);
+        const pdfPath = await createPdfFile(illust, images.map(i => i.buffer));
         let messageElements: h[];
         try {
           if (config.pdfSendMode === 'file') {
@@ -382,7 +413,9 @@ export function apply(ctx: Context, config: Config) {
         }
       }
 
-      const allContentNodes: h[] = [h('p', textInfo), ...imageBuffers.map(buffer => h.image(buffer, 'image/png'))]
+      // 直发时压缩图片（可配置）
+      const sendImages = await Promise.all(images.map(compressForSend))
+      const allContentNodes: h[] = [h('p', textInfo), ...sendImages.map(img => h.image(img.buffer, img.mime))]
       
       const platform = isSubscription ? config.pushBotPlatform : session?.platform
       if (config.forwardThreshold > 0 && imageCount >= config.forwardThreshold && ['qq', 'onebot'].includes(platform)) {
