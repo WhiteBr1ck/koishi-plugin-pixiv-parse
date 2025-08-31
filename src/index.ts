@@ -59,6 +59,7 @@ export interface Config {
   subscriptions?: Subscription[]
   pushBotPlatform?: string
   pushBotId?: string
+  enableR18Watermark: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -95,6 +96,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableDirectCompress: Schema.boolean().description('【直发模式】是否启用图片压缩以减少发送时的内存占用。').default(false),
     directCompressQuality: Schema.number().min(1).max(100).step(1).role('slider').default(80)
       .description('【直发模式】JPEG 图片质量 (1-100)。PNG 图片会进行无损压缩。'),
+    enableR18Watermark: Schema.boolean().description('【直发模式】（优先级低于转PDF，高于图片压缩和合并转发）对 R-18/R-18G 图片添加右下角 "R18" 水印，可一定程度上对抗QQ的审查。').default(false),
   }).description('插画输出模式设置'),
   
   Schema.object({
@@ -284,6 +286,32 @@ export function apply(ctx: Context, config: Config) {
     }
   }
 
+  // R18 右下角文字水印（保持原格式，不转 JPG）
+  async function addR18Watermark(
+    input: Buffer,
+    text = 'R18',
+    opts: { margin?: number; fontSize?: number; opacity?: number; color?: string } = {}
+  ): Promise<Buffer> {
+    const meta = await sharp(input).metadata()
+    const width = meta.width ?? 1080
+    const height = meta.height ?? Math.round(width * 1.3)
+    const margin = opts.margin ?? 24
+    const fontSize = opts.fontSize ?? Math.max(24, Math.round(width / 30))
+    const opacity = Math.max(0, Math.min(1, opts.opacity ?? 0.35))
+    const color = opts.color ?? '#000'
+    const esc = (s: string) => s.replace(/[<>&'"]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;' }[c] as string))
+    const svg = Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <style>
+          .t { font: ${fontSize}px sans-serif; fill:${color}; fill-opacity:${opacity};
+               stroke:#fff; stroke-opacity:${opacity}; stroke-width:${Math.max(1, Math.round(fontSize/16))} }
+        </style>
+        <text class="t" x="${width - margin}" y="${height - margin}" text-anchor="end">${esc(text)}</text>
+      </svg>
+    `)
+    return sharp(input).composite([{ input: svg }]).toBuffer() // 不指定格式，保留原图格式
+  }
+
   async function createPdfFile(illust: any, buffers: Buffer[]): Promise<string> {
     const safeTitle = (illust.title || illust.id).replace(/[\\/:\*\?"<>\|]/g, '_')
     const tempDir = path.resolve(ctx.app.baseDir, 'data', 'temp', 'pixiv-parse')
@@ -413,8 +441,17 @@ export function apply(ctx: Context, config: Config) {
         }
       }
 
+      // 仅直发模式，对 R18 且开启开关时加水印（保持原格式）
+      let imagesForSend = images
+      if (isR18 && config.enableR18Watermark) {
+        imagesForSend = await Promise.all(images.map(async (img) => ({
+          mime: img.mime,
+          buffer: await addR18Watermark(img.buffer, 'R18'),
+        })))
+      }
+
       // 直发时压缩图片（可配置）
-      const sendImages = await Promise.all(images.map(compressForSend))
+      const sendImages = await Promise.all(imagesForSend.map(compressForSend))
       const allContentNodes: h[] = [h('p', textInfo), ...sendImages.map(img => h.image(img.buffer, img.mime))]
       
       const platform = isSubscription ? config.pushBotPlatform : session?.platform
