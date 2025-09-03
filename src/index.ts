@@ -60,6 +60,7 @@ export interface Config {
   pushBotPlatform?: string
   pushBotId?: string
   enableR18Watermark: boolean
+  enablePngToJpeg: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -95,8 +96,9 @@ export const Config: Schema<Config> = Schema.intersect([
     
     enableDirectCompress: Schema.boolean().description('【直发模式】是否启用图片压缩以减少发送时的内存占用。').default(false),
     directCompressQuality: Schema.number().min(1).max(100).step(1).role('slider').default(80)
-      .description('【直发模式】JPEG 图片质量 (1-100)。PNG 图片会进行无损压缩。'),
+      .description('【直发模式】JPEG 图片质量 (1-100)。PNG 图片会进行无损压缩；若启用"PNG 转 JPG"则按此 JPEG 质量压缩。'),
     enableR18Watermark: Schema.boolean().description('【直发模式】（优先级低于转PDF，高于图片压缩和合并转发）对 R-18/R-18G 图片添加右下角 "R18" 水印，可一定程度上对抗QQ的审查。').default(false),
+    enablePngToJpeg: Schema.boolean().description('【直发模式】将 PNG 转为 JPG，并应用上方的 JPEG 压缩质量。透明像素会以白色背景合成。').default(false),
   }).description('插画输出模式设置'),
   
   Schema.object({
@@ -276,6 +278,15 @@ export function apply(ctx: Context, config: Config) {
         return { buffer: out, mime: 'image/jpeg' }
       }
       if (img.mime === 'image/png') {
+        // 若启用 PNG -> JPG，则转 JPG 并按 directCompressQuality 压缩（透明以白色背景合成）
+        if (config.enablePngToJpeg) {
+          const out = await sharp(img.buffer)
+            .flatten({ background: '#ffffff' })
+            .jpeg({ quality: config.directCompressQuality, mozjpeg: true })
+            .toBuffer()
+          return { buffer: out, mime: 'image/jpeg' }
+        }
+        // 否则按原有逻辑做 PNG 无损压缩
         const out = await sharp(img.buffer).png({ compressionLevel: 7, palette: true }).toBuffer()
         return { buffer: out, mime: 'image/png' }
       }
@@ -286,7 +297,7 @@ export function apply(ctx: Context, config: Config) {
     }
   }
 
-  // R18 右下角文字水印（保持原格式，不转 JPG）
+  // R18 随机边缘位置文字水印（保持原格式，不转 JPG）
   async function addR18Watermark(
     input: Buffer,
     text = 'R18',
@@ -299,6 +310,34 @@ export function apply(ctx: Context, config: Config) {
     const fontSize = opts.fontSize ?? Math.max(24, Math.round(width / 30))
     const opacity = Math.max(0, Math.min(1, opts.opacity ?? 0.35))
     const color = opts.color ?? '#000'
+    
+    // 随机选择边缘位置：0=上边，1=右边，2=下边，3=左边
+    const position = Math.floor(Math.random() * 4)
+    let x: number, y: number, anchor: string
+    
+    switch (position) {
+      case 0: // 上边 - 水平居中偏移
+        x = width / 2 + (Math.random() - 0.5) * (width * 0.4) // 中心±20%宽度内随机
+        y = margin + fontSize
+        anchor = 'middle'
+        break
+      case 1: // 右边 - 垂直居中偏移  
+        x = width - margin
+        y = height / 2 + (Math.random() - 0.5) * (height * 0.4) // 中心±20%高度内随机
+        anchor = 'end'
+        break
+      case 2: // 下边 - 水平居中偏移
+        x = width / 2 + (Math.random() - 0.5) * (width * 0.4) // 中心±20%宽度内随机
+        y = height - margin
+        anchor = 'middle'
+        break
+      case 3: // 左边 - 垂直居中偏移
+        x = margin
+        y = height / 2 + (Math.random() - 0.5) * (height * 0.4) // 中心±20%高度内随机
+        anchor = 'start'
+        break
+    }
+    
     const esc = (s: string) => s.replace(/[<>&'"]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;' }[c] as string))
     const svg = Buffer.from(`
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
@@ -306,7 +345,7 @@ export function apply(ctx: Context, config: Config) {
           .t { font: ${fontSize}px sans-serif; fill:${color}; fill-opacity:${opacity};
                stroke:#fff; stroke-opacity:${opacity}; stroke-width:${Math.max(1, Math.round(fontSize/16))} }
         </style>
-        <text class="t" x="${width - margin}" y="${height - margin}" text-anchor="end">${esc(text)}</text>
+        <text class="t" x="${x}" y="${y}" text-anchor="${anchor}">${esc(text)}</text>
       </svg>
     `)
     return sharp(input).composite([{ input: svg }]).toBuffer() // 不指定格式，保留原图格式
