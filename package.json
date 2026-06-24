@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-pixiv-parse",
-  "description": "提供 Pixiv 链接解析与更新订阅功能的 Koishi 插件",
-  "version": "0.3.2",
+  "description": "提供 Pixiv 链接解析与订阅功能的插件，支持 原图/合并转发/PDF 多种发送方式。现已支持Chatluna工具调用。",
+  "version": "0.4.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -33,23 +33,48 @@
         "database"
       ],
       "optional": [
-        "puppeteer"
+        "puppeteer",
+        "console",
+        "ffmpeg",
+        "chatluna"
       ]
     },
     "description": {
-      "zh": "Pixiv 原图下载插件，可以自动解析推特 pixiv 链接，同时也支持 pid 指令调用，订阅推送。发送方式多样（原图/PDF/合并转发）。"
+      "zh": "*现已支持Chatluna工具调用*全能 Pixiv 插件，支持解析/下载/转PDF/订阅/随机/GIF发送。"
     }
   },
   "peerDependencies": {
+    "@koishijs/plugin-console": "^5.30.0",
     "koishi": "^4.18.7",
+    "koishi-plugin-chatluna": "*",
+    "koishi-plugin-ffmpeg": "^1.1.0",
     "koishi-plugin-puppeteer": "*"
   },
+  "peerDependenciesMeta": {
+    "@koishijs/plugin-console": {
+      "optional": true
+    },
+    "koishi-plugin-chatluna": {
+      "optional": true
+    },
+    "koishi-plugin-ffmpeg": {
+      "optional": true
+    }
+  },
   "dependencies": {
-    "muhammara": "^5.3.0",
-    "sharp": "^0.33.5"
+    "@langchain/core": "^0.3.0",
+    "adm-zip": "^0.5.16",
+    "pdfkit": "^0.19.1",
+    "sharp": "^0.33.5",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@koishijs/client": "^5.30.4",
+    "@types/pdfkit": "^0.17.6"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:client",
+    "build:client": "node -e \"import('@koishijs/client/lib').then(({ build }) => build(process.cwd()))\"",
     "watch": "tsc -w"
   }
 }

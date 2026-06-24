@@ -3,19 +3,21 @@
 [![npm](https://img.shields.io/npm/v/koishi-plugin-pixiv-parse?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-pixiv-parse)
 [![license](https://img.shields.io/npm/l/koishi-plugin-pixiv-parse?style=flat-square)](https://github.com/WhiteBr1ck/koishi-plugin-pixiv-parse/blob/main/LICENSE)
 
-为 [Koishi](https://koishi.chat/) 提供 Pixiv 链接解析与订阅功能的插件，支持 原图/合并转发/PDF 多种发送方式。
+为 [Koishi](https://koishi.chat/) 提供 Pixiv 链接解析与订阅功能的插件，支持 原图/合并转发/PDF 多种发送方式。现已支持Chatluna工具调用。
 
 ## 功能
 
 - **自动解析**：识别聊天内容中的 Pixiv 作品链接并发送作品信息。
-- **指令支持**：通过 `pid` 和 `uid` 指令，获取指定作品或作者主页的信息。
+- **指令支持**：通过 `pid`、`uid`、`pixivsearch`、`pixivrandom` 等指令，获取指定作品、作者主页、搜索结果或随机热门作品。
 - **作者订阅**：提供订阅系统，可定时检查作者更新并推送到指定频道。
-- **多样化输出**：支持多图合并转发、自动转换为 PDF 等多种发送策略。
+- **多样化输出**：支持多图合并转发、自动转换为 PDF、PDF 密码提示等多种发送策略。
 - **R-18 内容处理**：可配置对 R-18/R-18G 内容的处理方式。
 - **R-18 水印功能**：直发模式下可为 R-18/R-18G 图片添加随机位置水印标识，避免固定位置被识别。
 - **图片压缩优化**：直发模式下支持 JPEG 压缩和 PNG 转 JPG，减少发送时的内存占用。
 - **主页截图**：利用 Puppeteer 对作者主页进行截图。
-- **可配置性**：提供丰富的配置项以自定义插件行为。
+- **Pixiv 搜索**：支持关键词搜索、高收藏优先、去重、AI 过滤、R18 策略和多种发送方式。
+- **随机热门**：支持随机发送 Pixiv 热门作品，并可单独配置数量、R18 策略和发送方式。
+- **ChatLuna 工具**：可选择将搜索和随机热门能力注册为 ChatLuna 工具。
 
 ## 安装
 
@@ -30,8 +32,21 @@
 
 - `pid <作品ID>`：获取指定 ID 的插画作品。
 - `uid <作者ID>`：获取指定 ID 的作者主页信息和截图。
+- `pixivsearch <关键词>`：搜索 Pixiv 作品并返回结果，例如 `pixivsearch 初音未来`。
+- `pixivrandom [数量]`：随机发送热门 Pixiv 作品，也可以使用中文别名 `试试手气`。
 - `pixivcheck`：手动触发所有订阅的更新检查。
 - `pixivtest <作者ID>`：测试获取指定作者的最新作品，并发送至当前会话。
+
+### pixivsearch 参数（除了数量其他指令主要给ai看的，日常用在插件配置里设置好就行了）
+
+- `-n <数量>`：本次返回的作品数量。
+- `-r <exclude|include|only>`：R18 策略，最终仍受全局 R18 设置限制。
+- `-m <auto|direct|forward|pdf>`：发送方式。
+- `-q <收藏阈值|off>`：最低收藏数，`off` 表示关闭高收藏阈值。
+- `-s <date_desc|date_asc>`：搜索排序。
+- `-t <tag|exact|text>`：搜索范围。
+- `-a <true|false|on|off>`：是否过滤 AI 作品。
+- `-p <first|all>`：多页作品发送策略。
 
 ## ⚙️ 配置项说明
 
@@ -54,6 +69,25 @@
 - `enableSubscription`: 订阅功能的总开关。
 - `pushBotPlatform` & `pushBotId`: 用于执行推送的机器人平台和账号 ID。
 - `subscriptions`: 订阅列表，用于配置作者 UID 和推送的目标频道 ID。
+
+### 搜索设置
+- `enableSearch`: 是否启用 `pixivsearch` 指令。
+- `searchDefaultCount`: 未指定 `-n` 时默认返回多少个作品。
+- `searchMaxCount`: `-n` 指定数量的上限，设为 `0` 表示无上限。
+- `searchPreferHighBookmarks`: 是否默认优先搜索高收藏作品。
+- `searchDedupEnabled`: 是否启用搜索去重。
+
+### 随机热门设置
+- `enableRandom`: 是否启用 `pixivrandom` 指令。
+- `randomDefaultCount`: 未填写数量时默认返回多少个作品。
+- `randomMaxCount`: 指令填写数量时的上限，设为 `0` 表示无上限。
+- `randomDefaultR18`: `pixivrandom` 的默认 R18 策略。
+
+### ChatLuna 工具
+- `enableChatLunaTools`: 是否注册 Pixiv 工具到 ChatLuna。
+- `chatLunaExposeSearch`: 是否向 ChatLuna 暴露 Pixiv 搜索工具。
+- `chatLunaExposeRandom`: 是否向 ChatLuna 暴露 Pixiv 随机热门工具。
+- `chatLunaMaxCount`: ChatLuna 单次工具调用最多返回多少个作品，设为 `0` 表示不额外限制。
 
 ### 如何获取凭证
 
@@ -78,6 +112,13 @@
 
 ## 更新日志
 
+### v0.4.0 (2026-06-24)
+- **[新增]** 新增 `pixivsearch` 搜索指令，支持数量、R18 策略、发送方式、收藏阈值、搜索范围、AI 过滤和多页策略。
+- **[新增]** 新增 `pixivrandom` 随机热门指令，并提供中文别名 `试试手气`。
+- **[新增]** 支持将 Pixiv 搜索和随机热门注册为 ChatLuna 工具，可在配置中分别控制暴露范围。
+- **[新增]** 配置页开头加入指令使用说明，并新增右侧悬浮导航。
+- **[新增]** 支持搜索去重、GIF 动图处理、PDFKit 生成 PDF 和 PDF 密码单独提示。
+- **[优化]** 搜索、随机热门和 ChatLuna 工具的数量上限支持设为 `0`，表示不额外限制返回作品数。
 ### v0.3.2 (2025-09-03)
 - **[新增]** 新增直发模式下 PNG 转 JPG 功能，可配置应用压缩设置。
 - **[优化]** R18 水印位置改为随机边缘位置，避免固定位置容易被识别。
@@ -98,10 +139,6 @@
 2.  通过本插件获取的所有内容的版权归原作者所有。
 3.  对于任何因不当使用本插件（如用于商业用途、未经授权的分发等）而导致的任何形式的损失或法律纠纷，开发者不承担任何责任。
 4.  请勿将此插件用于非法用途。处理 R-18/R-18G 内容时，使用者有责任遵守当地的法律法规。
-
-## 鸣谢
-
--   本插件的 Pixiv API 认证及请求部分的实现参考了 [**koishi-plugin-booru-pixiv**](https://www.npmjs.com/package/koishi-plugin-booru-pixiv) 的实现。
 
 ## License
 
